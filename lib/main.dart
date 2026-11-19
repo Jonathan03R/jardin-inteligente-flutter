@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'app_colors.dart';
 import 'features/garden/garden_page.dart';
 import 'features/mascot/mascot_preview_page.dart';
 
@@ -14,9 +15,10 @@ Future<void> main() async {
       debugPrint('[Supabase] Modo DEMO: no consulta datos reales.');
     }
     runApp(
-      const MaterialApp(
+      MaterialApp(
         debugShowCheckedModeBanner: false,
-        home: MascotPreviewPage(),
+        theme: _theme(),
+        home: const MascotPreviewPage(),
       ),
     );
     return;
@@ -76,12 +78,20 @@ class GardenApp extends StatelessWidget {
     return MaterialApp(
       title: 'Mi jardín',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF447A51)),
-        scaffoldBackgroundColor: const Color(0xFFF6F7F0),
-        useMaterial3: true,
-      ),
+      theme: _theme(),
       home: const GardenPage(),
     );
   }
 }
+
+ThemeData _theme() => ThemeData(
+  useMaterial3: true,
+  colorScheme: ColorScheme.fromSeed(seedColor: AppColors.brand, surface: AppColors.page),
+  scaffoldBackgroundColor: AppColors.page,
+  navigationBarTheme: NavigationBarThemeData(
+    backgroundColor: Colors.white,
+    indicatorColor: AppColors.brand.withValues(alpha: .14),
+    elevation: 0,
+    labelTextStyle: WidgetStateProperty.all(const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+  ),
+);

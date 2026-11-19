@@ -5,7 +5,8 @@ import 'package:flutter/material.dart';
 import '../garden/garden_dashboard.dart';
 import '../garden/reading.dart';
 
-/// Automatic sensor simulation for inspecting the app without hardware.
+/// Simulacion automatica de sensores para revisar la app sin hardware (`--dart-define=DEMO_MODE=true`).
+/// Recorre todos los animos; al pasar de "seco" a "humedo" la mascota agradece el riego.
 class MascotPreviewPage extends StatefulWidget {
   const MascotPreviewPage({super.key});
 
@@ -14,15 +15,21 @@ class MascotPreviewPage extends StatefulWidget {
 }
 
 class _MascotPreviewPageState extends State<MascotPreviewPage> {
-  static const states = ['idle', 'rain', 'thirsty', 'sleep', 'happy'];
+  static const steps = ['content', 'rain', 'thirsty', 'content', 'hot', 'cold', 'sleep', 'near'];
   Timer? timer;
   int index = 0;
+  int id = 1;
 
   @override
   void initState() {
     super.initState();
-    timer = Timer.periodic(const Duration(seconds: 8), (_) {
-      if (mounted) setState(() => index = (index + 1) % states.length);
+    timer = Timer.periodic(const Duration(seconds: 12), (_) {
+      if (mounted) {
+        setState(() {
+          index = (index + 1) % steps.length;
+          id++;
+        });
+      }
     });
   }
 
@@ -33,33 +40,30 @@ class _MascotPreviewPageState extends State<MascotPreviewPage> {
   }
 
   Reading get sample {
-    final state = states[index];
+    final s = steps[index];
     return Reading.fromJson({
-      'id': index + 1,
+      'id': id,
       'recorded_at': DateTime.now().toUtc().toIso8601String(),
-      'soil_raw': state == 'thirsty' ? 3050 : 1430,
-      'rain_raw': state == 'rain' ? 900 : 3450,
-      'light_raw': state == 'sleep' ? 500 : 2900,
-      'temperature_c': state == 'rain' ? 21.4 : 24.6,
-      'air_humidity': state == 'rain' ? 83.0 : 62.0,
-      'distance_cm': state == 'thirsty' ? 29.0 : 10.2,
-      'soil_wet': state != 'thirsty',
-      'raining': state == 'rain',
-      'tank_low': state == 'thirsty',
-      'dark': state == 'sleep',
+      'soil_raw': s == 'thirsty' ? 3150 : 1430,
+      'rain_raw': s == 'rain' ? 900 : 3450,
+      'light_raw': s == 'sleep' ? 420 : 2900,
+      'temperature_c': switch (s) {
+        'rain' => 19.4,
+        'hot' => 34.2,
+        'cold' => 9.5,
+        _ => 24.6,
+      },
+      'air_humidity': s == 'rain' ? 88.0 : 61.0,
+      'distance_cm': s == 'near' ? 9.0 : 24.0,
+      'soil_wet': s != 'thirsty',
+      'raining': s == 'rain',
+      'tank_low': false,
+      'dark': s == 'sleep',
     });
   }
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    backgroundColor: const Color(0xFFF7F8F2),
-    body: SafeArea(
-      child: GardenDashboard(
-        deviceName: 'Mi jardín',
-        state: states[index],
-        reading: sample,
-        demo: true,
-      ),
-    ),
+    body: GardenDashboard(reading: sample, link: LinkState.demo),
   );
 }

@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  model-viewer {
+    width: 100%; height: 100%; background: transparent;
+    --poster-color: transparent; --progress-bar-height: 0px;
+  }
+  model-viewer::part(default-progress-bar) { display: none; }
+</style>
+<script type="module" src="model-viewer.min.js"></script>
+</head>
+<body>
+<model-viewer id="m" src="brotito.glb"
+  animation-name="Idle" autoplay animation-crossfade-duration="450"
+  camera-target="0m 0.5m 0m" camera-orbit="0deg 80deg 3.1m" field-of-view="27deg"
+  min-camera-orbit="auto auto 3.1m" max-camera-orbit="auto auto 3.1m"
+  interpolation-decay="160" disable-zoom disable-pan disable-tap interaction-prompt="none"
+  environment-image="neutral" exposure="1.05" shadow-intensity="0.85" shadow-softness="0.9"
+  tone-mapping="neutral"></model-viewer>
+<script>
+  // Puente entre Flutter y la mascota. Flutter decide la emocion; aqui solo se reproduce
+  // con fundidos y se vuelve al estado de base cuando termina una reaccion.
+  const mv = document.getElementById('m');
+  const s = { base: 'Idle', once: null, onceAt: 0, ready: false, orbit: 0 };
+  const send = (name, data) => {
+    try { window.flutter_inappwebview && window.flutter_inappwebview.callHandler(name, data); } catch (_) {}
+  };
+  const loop = (name) => { mv.animationName = name; mv.play({ repetitions: Infinity }); };
+  const endReaction = () => {
+    if (!s.once) return;
+    const done = s.once;
+    s.once = null;
+    loop(s.base);
+    send('reactionEnd', done);
+  };
+
+  window.mascot = {
+    setBase(name) {
+      s.base = name;
+      if (s.ready && !s.once) loop(name);
+    },
+    react(name) {
+      if (!s.ready) return;
+      s.once = name;
+      s.onceAt = performance.now();
+      mv.animationName = name;
+      mv.play({ repetitions: 1 });
+    },
+    // Giro suave de camara: la mascota "se acomoda" mirando al usuario.
+    orbit(theta) {
+      s.orbit = theta;
+      mv.cameraOrbit = `${theta}deg 80deg 3.1m`;
+    },
+    tint(material, color) {
+      const m = mv.model && mv.model.materials.find((x) => x.name === material);
+      if (m) m.pbrMetallicRoughness.setBaseColorFactor(color);
+    },
+    speed(value) { mv.timeScale = value; },
+    state() { return { base: s.base, once: s.once, anim: mv.animationName, t: mv.currentTime, d: mv.duration }; },
+  };
+
+  // ---- caras: una sola visible, cambio instantaneo (no participa del fundido)
+  const faces = { timeline: {}, groups: {}, shown: null };
+  const facesReady = fetch('faces.json').then((r) => r.json()).then((j) => { faces.timeline = j; }).catch(() => {});
+  function indexFaceMaterials() {
+    faces.groups = {};
+    for (const m of mv.model.materials) {
+      const at = m.name.indexOf('@');
+      if (at < 0) continue;
+      const face = m.name.slice(at + 1);
+      const rgba = m.pbrMetallicRoughness.baseColorFactor.slice();
+      m.setAlphaMode('MASK');
+      m.setAlphaCutoff(0.5);
+      (faces.groups[face] = faces.groups[face] || []).push({ m, rgba });
+    }
+  }
+  function faceFor(clip, frac) {
+    const line = faces.timeline[clip];
+    if (!line || !line.length) return 'Neutral';
+    let face = line[0][1];
+    for (const [at, f] of line) if (frac >= at) face = f;
+    return face;
+  }
+  function showFace(face) {
+    if (face === faces.shown) return;
+    faces.shown = face;
+    for (const [name, mats] of Object.entries(faces.groups)) {
+      const on = name === face;
+      for (const { m, rgba } of mats) m.pbrMetallicRoughness.setBaseColorFactor([rgba[0], rgba[1], rgba[2], on ? 1 : 0]);
+    }
+  }
+
+  mv.addEventListener('load', async () => {
+    await facesReady;
+    indexFaceMaterials();
+    showFace(faceFor(s.base, 0));
+    s.ready = true;
+    loop(s.base);
+    send('ready', mv.availableAnimations);
+  });
+  mv.addEventListener('error', (e) => send('error', String(e.detail && e.detail.type)));
+  mv.addEventListener('finished', endReaction);
+
+  // Vuelve a la base un poco antes del final: el fundido empieza mientras la reaccion
+  // aun se mueve, sin pausas ni saltos a la pose de reposo.
+  (function tick() {
+    if (s.ready && mv.duration > 0) {
+      // Durante un fundido animationName ya es el clip nuevo: su cara aparece al instante.
+      // Justo tras cambiar de clip, currentTime aun puede ser del anterior: usar el inicio.
+      const fresh = s.once && performance.now() - s.onceAt < 120;
+      showFace(faceFor(mv.animationName, fresh ? 0 : (mv.currentTime % mv.duration) / mv.duration));
+    }
+    if (s.once && mv.animationName === s.once && performance.now() - s.onceAt > 250 &&
+        mv.duration > 0 && mv.currentTime >= mv.duration - 0.42) {
+      endReaction();
+    }
+    requestAnimationFrame(tick);
+  })();
+</script>
+</body>
+</html>

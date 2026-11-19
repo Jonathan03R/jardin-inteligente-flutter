@@ -33,6 +33,13 @@ class Reading {
   final bool soilWet, raining, tankLow, dark;
 
   bool get near => distance != null && distance! < 15;
+
+  /// Sensores analogicos de 12 bits (0-4095). En tierra y lluvia, mas alto = mas seco.
+  int get soilPercent => _pct(1 - soil / 4095);
+  int get rainPercent => _pct(1 - rain / 4095);
+  int get lightPercent => _pct(light / 4095);
+  static int _pct(double v) => (v.clamp(0.0, 1.0) * 100).round();
+
   String get ambientState => raining
       ? 'rain'
       : !soilWet || tankLow

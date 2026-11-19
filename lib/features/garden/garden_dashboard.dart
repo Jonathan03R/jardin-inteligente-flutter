@@ -1,319 +1,313 @@
 import 'package:flutter/material.dart';
 
-import '../mascot/mascot_card.dart';
+import '../../app_colors.dart';
+import '../mascot/mascot_brain.dart';
+import '../mascot/mascot_stage.dart';
 import 'reading.dart';
 
+enum LinkState { live, reconnecting, offline, demo }
+
+/// Pantalla principal: escenario con la mascota y lista compacta de sensores.
 class GardenDashboard extends StatelessWidget {
   const GardenDashboard({
     super.key,
-    required this.deviceName,
-    required this.state,
     required this.reading,
-    this.demo = false,
+    required this.link,
+    this.refreshing = false,
+    this.onRefresh,
+    this.brain,
   });
 
-  final String deviceName;
-  final String state;
   final Reading? reading;
-  final bool demo;
-
-  static const ink = Color(0xFF1A3027);
-  static const muted = Color(0xFF64766B);
+  final LinkState link;
+  final bool refreshing;
+  final Future<void> Function()? onRefresh;
+  final MascotBrain? brain;
 
   @override
   Widget build(BuildContext context) {
     final r = reading;
-    final live = r != null && !r.stale;
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(18, 12, 18, 28),
+    final list = ListView(
+      padding: EdgeInsets.zero,
+      physics: const AlwaysScrollableScrollPhysics(),
       children: [
-        Row(
+        MascotStage(
+          reading: r,
+          brain: brain,
+          header: _Header(link: link, reading: r, refreshing: refreshing, onRefresh: onRefresh),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(18, 18, 18, 6),
+          child: Row(
+            children: [
+              const Text(
+                'Sensores',
+                style: TextStyle(color: AppColors.ink, fontSize: 17, fontWeight: FontWeight.w800),
+              ),
+              const Spacer(),
+              Text(
+                r == null ? 'Sin lecturas' : 'Lectura de las ${hhmm(r.recordedAt)}',
+                style: const TextStyle(color: AppColors.muted, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+        ..._rows(r),
+        const SizedBox(height: 18),
+      ],
+    );
+    return onRefresh == null ? list : RefreshIndicator(onRefresh: onRefresh!, child: list);
+  }
+
+  List<Widget> _rows(Reading? r) {
+    final rows = <Widget>[
+      SensorRow(
+        icon: Icons.grass_rounded,
+        color: AppColors.soil,
+        label: 'Tierra',
+        status: r == null ? '—' : r.soilWet ? 'Húmeda' : 'Seca, necesita riego',
+        level: r == null ? null : r.soilWet ? Level.ok : Level.bad,
+        value: r == null ? '' : '${r.soilPercent} %',
+        fraction: r == null ? null : r.soilPercent / 100,
+      ),
+      SensorRow(
+        icon: Icons.water_outlined,
+        color: AppColors.water,
+        label: 'Tanque',
+        status: r == null
+            ? '—'
+            : r.distance == null
+            ? 'Sensor sin eco'
+            : r.tankLow
+            ? 'Nivel bajo'
+            : 'Suficiente',
+        level: r == null ? null : r.distance == null ? Level.warn : r.tankLow ? Level.bad : Level.ok,
+        value: r?.distance == null ? '' : 'a ${r!.distance!.toStringAsFixed(0)} cm',
+      ),
+      SensorRow(
+        icon: Icons.umbrella_outlined,
+        color: AppColors.rain,
+        label: 'Lluvia',
+        status: r == null ? '—' : r.raining ? 'Está lloviendo' : 'Sin lluvia',
+        level: r == null ? null : Level.ok,
+        value: r == null ? '' : '${r.rainPercent} %',
+        fraction: r == null ? null : r.rainPercent / 100,
+      ),
+      SensorRow(
+        icon: Icons.light_mode_outlined,
+        color: AppColors.sun,
+        label: 'Luz',
+        status: r == null ? '—' : r.dark ? 'Poca luz' : 'Hay luz',
+        level: r == null ? null : Level.ok,
+        value: r == null ? '' : '${r.lightPercent} %',
+        fraction: r == null ? null : r.lightPercent / 100,
+      ),
+      SensorRow(
+        icon: Icons.thermostat_outlined,
+        color: AppColors.heat,
+        label: 'Temperatura',
+        status: _tempStatus(r?.temperature),
+        level: _tempLevel(r?.temperature),
+        value: r?.temperature == null ? '' : '${r!.temperature!.toStringAsFixed(1)} °C',
+      ),
+      SensorRow(
+        icon: Icons.water_drop_outlined,
+        color: AppColors.air,
+        label: 'Humedad del aire',
+        status: r?.humidity == null ? 'Sin dato' : r!.humidity! < 30 ? 'Aire seco' : r.humidity! > 85 ? 'Muy húmedo' : 'Normal',
+        level: r?.humidity == null ? null : Level.ok,
+        value: r?.humidity == null ? '' : '${r!.humidity!.toStringAsFixed(0)} %',
+        fraction: r?.humidity == null ? null : r!.humidity! / 100,
+      ),
+    ];
+    return [
+      for (var i = 0; i < rows.length; i++) ...[
+        rows[i],
+        if (i < rows.length - 1) const Divider(height: 1, thickness: 1, indent: 56, endIndent: 18, color: AppColors.line),
+      ],
+    ];
+  }
+
+  static String _tempStatus(double? t) => t == null
+      ? 'Sin dato'
+      : t >= MascotBrain.hotC
+      ? 'Mucho calor'
+      : t <= MascotBrain.coldC
+      ? 'Frío'
+      : 'Agradable';
+
+  static Level? _tempLevel(double? t) =>
+      t == null ? null : t >= MascotBrain.hotC || t <= MascotBrain.coldC ? Level.warn : Level.ok;
+}
+
+String hhmm(DateTime t) => '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
+
+String ago(DateTime t) {
+  final d = DateTime.now().difference(t);
+  if (d.inSeconds < 60) return 'hace ${d.inSeconds.clamp(1, 59)} s';
+  if (d.inMinutes < 60) return 'hace ${d.inMinutes} min';
+  if (d.inHours < 24) return 'hace ${d.inHours} h';
+  return 'hace ${d.inDays} d';
+}
+
+enum Level { ok, warn, bad }
+
+extension LevelColor on Level {
+  Color get color => switch (this) {
+    Level.ok => AppColors.ink,
+    Level.warn => AppColors.warn,
+    Level.bad => AppColors.bad,
+  };
+}
+
+class _Header extends StatelessWidget {
+  const _Header({required this.link, required this.reading, required this.refreshing, this.onRefresh});
+  final LinkState link;
+  final Reading? reading;
+  final bool refreshing;
+  final Future<void> Function()? onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = DefaultTextStyle.of(context).style.color ?? AppColors.ink;
+    final (dot, text) = switch (link) {
+      LinkState.demo => (AppColors.warn, 'Demo'),
+      LinkState.offline => (AppColors.bad, 'Sin conexión'),
+      LinkState.reconnecting => (AppColors.warn, 'Reconectando…'),
+      LinkState.live =>
+        reading == null
+            ? (AppColors.warn, 'Sin lecturas')
+            : reading!.stale
+            ? (AppColors.warn, 'Última ${ago(reading!.recordedAt)}')
+            : (AppColors.ok, 'En vivo · ${ago(reading!.recordedAt)}'),
+    };
+    return SafeArea(
+      bottom: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 6, 6, 0),
+        child: Row(
           children: [
+            const Text('Mi jardín', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+            const SizedBox(width: 10),
+            Container(width: 8, height: 8, decoration: BoxDecoration(color: dot, shape: BoxShape.circle)),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                text,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: fg.withValues(alpha: .8)),
+              ),
+            ),
+            const Spacer(),
+            if (onRefresh != null)
+              IconButton(
+                tooltip: 'Actualizar lecturas',
+                onPressed: refreshing ? null : onRefresh,
+                icon: refreshing
+                    ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: fg))
+                    : const Icon(Icons.refresh_rounded, size: 22),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Fila de sensor: icono, nombre y estado a la izquierda; valor y medidor a la derecha.
+class SensorRow extends StatelessWidget {
+  const SensorRow({
+    super.key,
+    required this.icon,
+    required this.color,
+    required this.label,
+    required this.status,
+    required this.value,
+    this.level,
+    this.fraction,
+  });
+
+  final IconData icon;
+  final Color color;
+  final String label, status, value;
+  final Level? level;
+  final double? fraction;
+
+  @override
+  Widget build(BuildContext context) {
+    final alert = level == Level.warn || level == Level.bad;
+    return Semantics(
+      label: '$label: $status${value.isEmpty ? '' : ', $value'}',
+      excludeSemantics: true,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 10, 18, 10),
+        child: Row(
+          children: [
+            Icon(icon, color: color, size: 24),
+            const SizedBox(width: 14),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'MI JARDÍN',
-                    style: TextStyle(
-                      color: muted,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.6,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    deviceName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: ink,
-                      fontSize: 27,
-                      fontWeight: FontWeight.w800,
-                    ),
+                  Text(label, style: const TextStyle(color: AppColors.muted, fontSize: 12.5, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 1),
+                  Row(
+                    children: [
+                      if (alert) ...[
+                        Icon(Icons.error_rounded, size: 15, color: level!.color),
+                        const SizedBox(width: 4),
+                      ],
+                      Flexible(
+                        child: Text(
+                          status,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: level?.color ?? AppColors.ink,
+                            fontSize: 15.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: demo
-                    ? const Color(0xFFFFEFCB)
-                    : live
-                    ? const Color(0xFFDDEFE0)
-                    : const Color(0xFFF1E4D9),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    demo
-                        ? Icons.science_outlined
-                        : live
-                        ? Icons.circle
-                        : r == null
-                        ? Icons.inbox_outlined
-                        : Icons.wifi_off,
-                    size: 13,
-                    color: demo
-                        ? const Color(0xFF8B5B19)
-                        : live
-                        ? const Color(0xFF288452)
-                        : const Color(0xFF9B5B41),
+            const SizedBox(width: 12),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  value,
+                  style: const TextStyle(
+                    color: AppColors.ink,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    fontFeatures: [FontFeature.tabularFigures()],
                   ),
-                  const SizedBox(width: 6),
-                  Text(
-                    demo
-                        ? 'Demo'
-                        : live
-                        ? 'En vivo'
-                        : r == null
-                        ? 'Sin lecturas'
-                        : 'Sin señal',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
+                ),
+                if (fraction != null) ...[
+                  const SizedBox(height: 5),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(3),
+                    child: SizedBox(
+                      width: 64,
+                      height: 5,
+                      child: LinearProgressIndicator(
+                        value: fraction!.clamp(0.0, 1.0),
+                        backgroundColor: color.withValues(alpha: .15),
+                        valueColor: AlwaysStoppedAnimation(alert ? level!.color : color),
+                      ),
                     ),
                   ),
                 ],
-              ),
+              ],
             ),
           ],
         ),
-        const SizedBox(height: 18),
-        MascotCard(state: state),
-        const SizedBox(height: 16),
-        if (demo || !live)
-          _Notice(
-            text: demo
-                ? 'Demostración automática. Valores simulados, sin conexión al ESP32.'
-                : r == null
-                ? 'Aún no hay lecturas en Supabase.'
-                : 'La última lectura en Supabase es antigua.',
-            icon: demo || r == null
-                ? Icons.info_outline
-                : Icons.wifi_off_outlined,
-          ),
-        const SizedBox(height: 22),
-        const Text(
-          'Así está tu jardín',
-          style: TextStyle(
-            color: ink,
-            fontSize: 21,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        const SizedBox(height: 3),
-        Text(
-          r == null
-              ? 'Los sensores aparecerán aquí.'
-              : 'Última lectura: ${_time(r.recordedAt)}',
-          style: const TextStyle(color: muted, fontSize: 13),
-        ),
-        const SizedBox(height: 14),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final width = (constraints.maxWidth - 12) / 2;
-            return Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                _SensorCard(
-                  width: width,
-                  icon: Icons.grass_rounded,
-                  title: 'Tierra',
-                  value: r == null
-                      ? '—'
-                      : r.soilWet
-                      ? 'Húmeda'
-                      : 'Seca',
-                  detail: r == null ? 'Sin datos' : '${r.soil} / 4095',
-                  tone: const Color(0xFF4D8A58),
-                ),
-                _SensorCard(
-                  width: width,
-                  icon: Icons.water_drop_outlined,
-                  title: 'Lluvia',
-                  value: r == null
-                      ? '—'
-                      : r.raining
-                      ? 'Llueve'
-                      : 'Sin lluvia',
-                  detail: r == null ? 'Sin datos' : '${r.rain} / 4095',
-                  tone: const Color(0xFF4A83AB),
-                ),
-                _SensorCard(
-                  width: width,
-                  icon: Icons.water_outlined,
-                  title: 'Tanque',
-                  value: r == null
-                      ? '—'
-                      : r.distance == null
-                      ? 'Sin eco'
-                      : r.tankLow
-                      ? 'Nivel bajo'
-                      : 'Suficiente',
-                  detail: _number(r?.distance, 'cm'),
-                  tone: const Color(0xFF4D91A3),
-                ),
-                _SensorCard(
-                  width: width,
-                  icon: Icons.light_mode_outlined,
-                  title: 'Luz',
-                  value: r == null
-                      ? '—'
-                      : r.dark
-                      ? 'Poca luz'
-                      : 'Hay luz',
-                  detail: r == null ? 'Sin datos' : '${r.light} / 4095',
-                  tone: const Color(0xFFBE8B37),
-                ),
-                _SensorCard(
-                  width: width,
-                  icon: Icons.thermostat_outlined,
-                  title: 'Temperatura',
-                  value: _number(r?.temperature, '°C'),
-                  detail: 'Aire',
-                  tone: const Color(0xFFC57856),
-                ),
-                _SensorCard(
-                  width: width,
-                  icon: Icons.air_outlined,
-                  title: 'Humedad aire',
-                  value: _number(r?.humidity, '%'),
-                  detail: 'DHT11',
-                  tone: const Color(0xFF6887A2),
-                ),
-              ],
-            );
-          },
-        ),
-      ],
+      ),
     );
   }
-
-  static String _number(double? n, String unit) =>
-      n == null ? 'Sin dato' : '${n.toStringAsFixed(1)} $unit';
-  static String _time(DateTime t) =>
-      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
-}
-
-class _Notice extends StatelessWidget {
-  const _Notice({required this.text, required this.icon});
-  final String text;
-  final IconData icon;
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(13),
-    decoration: BoxDecoration(
-      color: const Color(0xFFFFF1DB),
-      borderRadius: BorderRadius.circular(16),
-    ),
-    child: Row(
-      children: [
-        Icon(icon, size: 20, color: const Color(0xFF9A6429)),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            text,
-            style: const TextStyle(
-              color: Color(0xFF5F492E),
-              fontSize: 12,
-              height: 1.35,
-            ),
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
-class _SensorCard extends StatelessWidget {
-  const _SensorCard({
-    required this.width,
-    required this.icon,
-    required this.title,
-    required this.value,
-    required this.detail,
-    required this.tone,
-  });
-  final double width;
-  final IconData icon;
-  final String title, value, detail;
-  final Color tone;
-  @override
-  Widget build(BuildContext context) => Container(
-    width: width,
-    constraints: const BoxConstraints(minHeight: 124),
-    padding: const EdgeInsets.all(15),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(20),
-      border: Border.all(color: const Color(0xFFE9EEE7)),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(icon, color: tone, size: 20),
-            const SizedBox(width: 7),
-            Expanded(
-              child: Text(
-                title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: GardenDashboard.muted,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 13),
-        Text(
-          value,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            color: GardenDashboard.ink,
-            fontSize: 18,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          detail,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(color: GardenDashboard.muted, fontSize: 11),
-        ),
-      ],
-    ),
-  );
 }

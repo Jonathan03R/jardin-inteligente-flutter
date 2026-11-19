@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'alerts_view.dart';
 import 'garden_dashboard.dart';
+import 'history_view.dart';
 import 'garden_repository.dart';
 import 'reading.dart';
 
@@ -22,12 +24,9 @@ class _GardenPageState extends State<GardenPage> with WidgetsBindingObserver {
   StreamSubscription<List<Reading>>? subscription;
   bool realtimeConnected = false;
   bool started = false;
-  Timer? happyTimer;
   Timer? freshnessTimer;
   bool refreshing = false;
   List<Reading> readings = [];
-  bool wasNear = false;
-  String? temporaryState;
   bool loadError = false;
   int tab = 0;
 
@@ -54,21 +53,10 @@ class _GardenPageState extends State<GardenPage> with WidgetsBindingObserver {
 
   void _accept(List<Reading> items) {
     if (!mounted) return;
-    final near = items.isNotEmpty && items.first.near;
-    final fresh = items.isNotEmpty && !items.first.stale;
-    final greeting = near && !wasNear && fresh && readings.isNotEmpty;
     setState(() {
       readings = items;
-      wasNear = near;
       loadError = false;
-      if (greeting) temporaryState = 'happy';
     });
-    if (greeting) {
-      happyTimer?.cancel();
-      happyTimer = Timer(const Duration(seconds: 2), () {
-        if (mounted) setState(() => temporaryState = null);
-      });
-    }
   }
 
   Future<void> _refresh() async {
@@ -97,7 +85,6 @@ class _GardenPageState extends State<GardenPage> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     unawaited(subscription?.cancel());
     unawaited(repository.dispose());
-    happyTimer?.cancel();
     freshnessTimer?.cancel();
     super.dispose();
   }
@@ -105,76 +92,40 @@ class _GardenPageState extends State<GardenPage> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final latest = readings.isEmpty ? null : readings.first;
-    final state = temporaryState ?? latest?.ambientState ?? 'idle';
+    final link = loadError
+        ? LinkState.offline
+        : realtimeConnected
+        ? LinkState.live
+        : LinkState.reconnecting;
     return Scaffold(
-      appBar: AppBar(
-        title: Text(['Resumen', 'Historial', 'Alertas'][tab]),
-        actions: [
-          IconButton(
-            tooltip: 'Actualizar lecturas',
-            onPressed: refreshing ? null : _refresh,
-            icon: refreshing
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.refresh),
-          ),
+      body: IndexedStack(
+        index: tab,
+        children: [
+          GardenDashboard(reading: latest, link: link, refreshing: refreshing, onRefresh: _refresh),
+          HistoryView(readings: readings, onRefresh: _refresh),
+          AlertsView(latest: latest),
         ],
       ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            if (!realtimeConnected && !loadError)
-              const Padding(
-                padding: EdgeInsets.all(8),
-                child: Text('Reconectando actualizaciones en vivo…'),
-              ),
-            if (loadError)
-              const Padding(
-                padding: EdgeInsets.fromLTRB(18, 10, 18, 0),
-                child: Card(
-                  child: ListTile(
-                    leading: Icon(Icons.wifi_off, color: Colors.redAccent),
-                    title: Text('Sin conexión con Supabase'),
-                    subtitle: Text(
-                      'Comprueba Internet y la configuración del proyecto.',
-                    ),
-                  ),
-                ),
-              ),
-            Expanded(
-              child: IndexedStack(
-                index: tab,
-                children: [
-                  GardenDashboard(
-                    deviceName: 'Mi jardín',
-                    state: state,
-                    reading: latest,
-                  ),
-                  _history(),
-                  _alerts(latest),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
       bottomNavigationBar: NavigationBar(
+        height: 64,
         selectedIndex: tab,
         onDestinationSelected: (value) => setState(() => tab = value),
-        destinations: const [
-          NavigationDestination(
+        destinations: [
+          const NavigationDestination(
             icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home_rounded),
             label: 'Inicio',
           ),
-          NavigationDestination(
-            icon: Icon(Icons.show_chart),
+          const NavigationDestination(
+            icon: Icon(Icons.show_chart_rounded),
             label: 'Historial',
           ),
           NavigationDestination(
-            icon: Icon(Icons.notifications_outlined),
+            icon: Badge(
+              isLabelVisible: _alertCount(latest) > 0,
+              label: Text('${_alertCount(latest)}'),
+              child: const Icon(Icons.notifications_outlined),
+            ),
             label: 'Alertas',
           ),
         ],
@@ -182,57 +133,8 @@ class _GardenPageState extends State<GardenPage> with WidgetsBindingObserver {
     );
   }
 
-  Widget _history() {
-    if (readings.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Aún no hay lecturas en Supabase.'),
-            const SizedBox(height: 8),
-            TextButton.icon(
-              onPressed: refreshing ? null : _refresh,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Actualizar'),
-            ),
-          ],
-        ),
-      );
-    }
-    return ListView.builder(
-      itemCount: readings.length,
-      itemBuilder: (context, index) {
-        final reading = readings[index];
-        return ListTile(
-          leading: Icon(reading.raining ? Icons.cloudy_snowing : Icons.spa),
-          title: Text(
-            'Tierra ${reading.soilWet ? 'húmeda' : 'seca'} · ${reading.temperature?.toStringAsFixed(1) ?? '—'} °C',
-          ),
-          subtitle: Text(
-            '${reading.recordedAt.toString().substring(0, 19)} · Lluvia ${reading.raining ? 'sí' : 'no'}',
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _alerts(Reading? latest) {
-    final messages = <String>[
-      if (latest == null || latest.stale) 'Sin lecturas recientes en Supabase',
-      if (latest?.tankLow ?? false) 'Agua baja en el tanque',
-      if (latest != null && !latest.soilWet) 'Tierra seca: revisa el riego',
-      if (latest?.raining ?? false) 'Está lloviendo',
-      if (latest != null && latest.distance == null) 'Sensor de tanque sin eco',
-    ];
-    if (messages.isEmpty) messages.add('Todo bien en el jardín');
-    return ListView(
-      children: [
-        for (final message in messages)
-          ListTile(
-            leading: const Icon(Icons.notifications_active_outlined),
-            title: Text(message),
-          ),
-      ],
-    );
+  static int _alertCount(Reading? r) {
+    if (r == null) return 1;
+    return [r.stale, r.tankLow, !r.soilWet, r.distance == null].where((x) => x).length;
   }
 }
